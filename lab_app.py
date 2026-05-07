@@ -25,7 +25,7 @@ tab1, tab2 = st.tabs(["📅 校准提醒", "📦 试剂管理"])
 with tab1:
     try:
         # 使用英文名 calibration 彻底避免 ASCII 编码报错
-        df = conn.read(worksheet="calibration", ttl="5m")
+        df = conn.read(worksheet="calibration", ttl=0)
         
         # 转换并计算
         df['校准到期时间'] = pd.to_datetime(df['校准到期时间'])
