@@ -3,11 +3,11 @@ import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-# --- 1. 页面设置 ---
+# --- 1. 页面配置 ---
 st.set_page_config(page_title="福建实验室管理", layout="wide")
 
 # --- 2. 建立 Google Sheets 连接 ---
-# 注意：确保你已经在 Streamlit Cloud 的 Secrets 中配置了 spreadsheet 链接
+# 它会自动去 Secrets 里读取配置，不再需要本地 Excel 文件
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- 3. 辅助函数 ---
@@ -16,7 +16,7 @@ def get_status(days):
     if days <= 30: return "🟡 临近到期"
     return "🟢 正常"
 
-# --- 4. 标题 ---
+# --- 4. 主界面 ---
 st.title("🧪 实验室综合管理平台")
 
 tab1, tab2 = st.tabs(["📅 校准提醒", "📦 试剂管理"])
@@ -24,11 +24,10 @@ tab1, tab2 = st.tabs(["📅 校准提醒", "📦 试剂管理"])
 # --- Tab 1: 校准监控模块 ---
 with tab1:
     try:
-        # 从 Google Sheets 的“校准时间统计”工作表读取数据
-        # ttl=600 表示缓存10分钟，避免频繁刷新降低速度
-        df = conn.read(worksheet="校准时间统计", ttl=600)
+        # 使用英文名 calibration 彻底避免 ASCII 编码报错
+        df = conn.read(worksheet="calibration", ttl="5m")
         
-        # 转换时间并计算状态
+        # 转换并计算
         df['校准到期时间'] = pd.to_datetime(df['校准到期时间'])
         df['剩余天数'] = (df['校准到期时间'] - datetime.now()).dt.days
         df['状态'] = df['剩余天数'].apply(get_status)
@@ -36,25 +35,24 @@ with tab1:
         # 搜索功能
         search = st.text_input("🔍 搜索客户或工程师")
         if search:
-            # 增加 fillna('') 防止因为表格中有空值导致搜索报错
+            # fillna('') 防止空单元格导致搜索报错
             df = df[df['客户'].fillna('').str.contains(search) | 
                     df['工程师'].fillna('').str.contains(search)]
 
         st.dataframe(df[['工程师', '客户', '模块', '校准到期时间', '状态']], use_container_width=True)
     except Exception as e:
-        st.warning(f"未能从 Google 表格读取校准数据。请检查 Sheet 名称是否为 '校准时间统计'。错误信息: {e}")
+        st.error(f"❌ 校准数据读取失败。请确认 Sheet 名称已改为 'calibration'。错误详情: {e}")
 
-# --- Tab 2: 试剂库存管理 (实现持久化保存) ---
+# --- Tab 2: 试剂库存管理 ---
 with tab2:
     st.header("试剂库存登记")
     
     try:
-        # 从 Google Sheets 的“校准试剂库存”工作表读取数据
-        # ttl=0 极其重要！确保每次看到的都是云端最新的库存，而不是旧缓存
-        reagent_df = conn.read(worksheet="校准试剂库存", ttl=0)
+        # 读取英文名 reagents 标签页，不设置缓存(ttl=0)以保证实时性
+        reagent_df = conn.read(worksheet="reagents", ttl=0)
         
-        # 使用 data_editor 创建可以直接修改的表格
-        # num_rows="dynamic" 允许同事们点击表格底部的 "+" 号添加新行
+        # 使用 data_editor 实现手机端点击修改
+        # num_rows="dynamic" 允许添加新行（点击表格底部的 + 号）
         edited_df = st.data_editor(
             reagent_df, 
             num_rows="dynamic", 
@@ -62,12 +60,14 @@ with tab2:
             key="reagent_editor"
         )
         
-        # 保存按钮：这是解决“刷新消失”的核心
-        if st.button("💾 保存并同步库存到云端"):
-            # 将修改后的数据写回 Google Sheets
-            conn.update(worksheet="校准试剂库存", data=edited_df)
-            st.success("✅ 库存已永久保存到云端，同事刷新后也能看到！")
-            st.balloons()
-            
+        # 核心：保存按钮，将修改同步回云端
+        if st.button("💾 点击此处：保存并同步到云端"):
+            try:
+                conn.update(worksheet="reagents", data=edited_df)
+                st.success("✅ 保存成功！数据已写入 Google 表格，全员同步。")
+                st.balloons()
+            except Exception as save_error:
+                st.error(f"保存失败，请检查 Google 表格权限：{save_error}")
+                
     except Exception as e:
-        st.error(f"无法加载库存表。请确保 Google 表格中有一个 Sheet 叫 '校准试剂库存'。错误: {e}")
+        st.error(f"❌ 库存表读取失败。请确认 Sheet 名称已改为 'reagents'。错误详情: {e}")
